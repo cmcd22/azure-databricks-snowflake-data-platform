@@ -18,8 +18,8 @@ ENDPOINTS = {
     "carts": "/carts",
 }
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass
 class IngestionConfig:
@@ -35,6 +35,8 @@ def get_json(url: str, timeout_seconds: int) -> Any:
 
 
 def build_output_path(output_root: Path, entity: str, ingestion_date: str) -> Path:
+    # Partition raw extracts by entity and ingestion date so downstream jobs can
+    # read a specific daily snapshot without scanning the entire raw zone.
     return output_root / entity / f"ingestion_date={ingestion_date}" / f"{entity}.json"
 
 
@@ -51,11 +53,15 @@ def ingest_entity(entity: str, endpoint: str, config: IngestionConfig, batch_id:
 
     data = get_json(url, config.timeout_seconds)
 
+    # The API mostly returns arrays, but keeping this branch allows the metadata
+    # to stay correct if an endpoint ever returns a single object instead.
     if isinstance(data, list):
         record_count = len(data)
     else:
         record_count = 1
 
+    # Store source metadata alongside the raw response so lineage, run tracking,
+    # and record counts are available without re-reading the payload itself.
     payload = {
         "metadata": {
             "source": "fakestoreapi",
@@ -76,6 +82,8 @@ def ingest_entity(entity: str, endpoint: str, config: IngestionConfig, batch_id:
 
 def main() -> int:
     config = IngestionConfig()
+    # Use one batch identifier across all entities so files from the same run can
+    # be correlated even though they are written to separate folders.
     batch_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     print("Starting Fake Store API ingestion...")
